@@ -2,52 +2,43 @@ import pygame
 import serial
 import time
 
-# Initialize pygame and joystick
+# Initialize Pygame for joystick handling
 pygame.init()
 pygame.joystick.init()
 
-# Initialize the first joystick
+# Set up joystick
 joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
-# Setup serial communication with Arduino
-arduino = serial.Serial('/dev/ttyACM1', 9600, timeout=1)  # Adjust '/dev/ttyACM0' to your correct port
-time.sleep(2)  # Wait for connection to establish
+# Set up Arduino connection
+arduino = serial.Serial('/dev/ttyACM2', 9600, timeout=1)
+time.sleep(2)
 
-def send_angles_to_arduino(angle1, angle2):
-    # Ensure to send the angles followed by a newline character
-    arduino.write(f"{angle1},{angle2}\n".encode())
-    print(f"Sent angles: {angle1},{angle2}")
+# Function to map joystick value (-1 to 1) to servo angle (0 to 180)
+def map_joystick_value(value):
+    return int((value + 1) * 90)
 
-def main():
-    previous_angle1 = -1  # Store the previous angle for left joystick
-    previous_angle2 = -1  # Store the previous angle for right joystick
+# Main loop
+while True:
+    pygame.event.pump()  # Process events to get joystick values
     
-    while True:
-        pygame.event.pump()  # Process pygame events
-
-        # Read the Y-axis of the left joystick (up is negative, down is positive)
-        left_y_axis_value = joystick.get_axis(1)
-        
-        # Read the Y-axis of the right joystick (up is negative, down is positive)
-        right_y_axis_value = joystick.get_axis(4)
-
-        # Convert joystick values (-1 to 1) to servo angles (0 to 180)
-        angle1 = int((left_y_axis_value + 1) * 90)
-        angle2 = int((right_y_axis_value + 1) * 90)
-
-        # Send the angles to Arduino only if they have changed
-        if angle1 != previous_angle1 or angle2 != previous_angle2:
-            send_angles_to_arduino(angle1, angle2)
-            previous_angle1 = angle1
-            previous_angle2 = angle2
-
-        time.sleep(0.1)  # Adjust if needed for smoother control
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("Program stopped")
-    finally:
-        arduino.close()
+    # Get joystick Y-axis values (up-down movement)
+    left_y_axis = joystick.get_axis(1)  # Left joystick (Y-axis)
+    right_y_axis = joystick.get_axis(4)  # Right joystick (Y-axis)
+    
+    # Map joystick values to angles (0 to 180 degrees)
+    left_servo_angle = map_joystick_value(left_y_axis)
+    right_servo_angle = map_joystick_value(right_y_axis)
+    
+    # Synchronize movement: The servos should remain parallel and aligned
+    # Adjust the angles to keep them synchronized
+    average_angle = (left_servo_angle + right_servo_angle) // 2
+    left_servo_angle = average_angle
+    right_servo_angle = average_angle
+    
+    # Send the angle to Arduino for both servos (servo 1 and servo 2)
+    arduino.write(f"{left_servo_angle},{right_servo_angle}\n".encode('utf-8'))
+    
+    print(f"Left Servo Angle: {left_servo_angle}, Right Servo Angle: {right_servo_angle}")
+    
+    time.sleep(0.05)  # Small delay to avoid overwhelming the serial communication
