@@ -11,7 +11,7 @@ joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
 # Set up Arduino connection
-arduino = serial.Serial('/dev/ttyACM2', 9600, timeout=1)
+arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
 time.sleep(2)
 
 # Function to map joystick value (-1 to 1) to servo angle (0 to 180)
