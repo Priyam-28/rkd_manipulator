@@ -18,27 +18,34 @@ time.sleep(2)
 def map_joystick_value(value):
     return int((value + 1) * 90)
 
+# Initial positions of the servos
+current_up_down_angle = 90  # Starting in the middle
+current_left_right_angle = 90  # Starting in the middle
+
+# Deadzone threshold to prevent small movements from the joystick causing updates
+DEADZONE = 0.1
+
 # Main loop
 while True:
     pygame.event.pump()  # Process events to get joystick values
     
-    # Get joystick Y-axis values (up-down movement)
-    left_y_axis = joystick.get_axis(1)  # Left joystick (Y-axis)
-    right_y_axis = joystick.get_axis(4)  # Right joystick (Y-axis)
+    # Get joystick Y-axis value (up-down movement from left joystick)
+    left_y_axis = joystick.get_axis(1)  # Left joystick (Y-axis for up/down)
+
+    # Get joystick X-axis value (left-right movement from right joystick)
+    right_x_axis = joystick.get_axis(2)  # Right joystick (X-axis for left/right)
     
-    # Map joystick values to angles (0 to 180 degrees)
-    left_servo_angle = map_joystick_value(left_y_axis)
-    right_servo_angle = map_joystick_value(right_y_axis)
+    # Only update the up-down servo if the joystick is moved past the deadzone
+    if abs(left_y_axis) > DEADZONE:
+        current_up_down_angle = map_joystick_value(left_y_axis)
     
-    # Synchronize movement: The servos should remain parallel and aligned
-    # Adjust the angles to keep them synchronized
-    average_angle = (left_servo_angle + right_servo_angle) // 2
-    left_servo_angle = average_angle
-    right_servo_angle = average_angle
+    # Only update the left-right servo if the joystick is moved past the deadzone
+    if abs(right_x_axis) > DEADZONE:
+        current_left_right_angle = map_joystick_value(right_x_axis)
     
-    # Send the angle to Arduino for both servos (servo 1 and servo 2)
-    arduino.write(f"{left_servo_angle},{right_servo_angle}\n".encode('utf-8'))
+    # Send the angle to Arduino for both movements (servo 1 for up-down and servo 2 for left-right)
+    arduino.write(f"{current_up_down_angle},{current_left_right_angle}\n".encode('utf-8'))
     
-    print(f"Left Servo Angle: {left_servo_angle}, Right Servo Angle: {right_servo_angle}")
+    print(f"Up-Down Servo Angle: {current_up_down_angle}, Left-Right Servo Angle: {current_left_right_angle}")
     
     time.sleep(0.05)  # Small delay to avoid overwhelming the serial communication
