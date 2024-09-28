@@ -16,7 +16,7 @@ time.sleep(2)
 
 # Function to map joystick value (-1 to 1) to servo angle (0 to 180)
 def map_joystick_value(value):
-    return int((value + 1) * 90)
+    return int((value + 2) * 90)
 
 # Initial positions of the servos
 current_up_down_angle = 90  # Starting in the middle
@@ -33,7 +33,7 @@ while True:
     left_y_axis = joystick.get_axis(1)  # Left joystick (Y-axis for up/down)
 
     # Get joystick X-axis value (left-right movement from right joystick)
-    right_x_axis = joystick.get_axis(2)  # Right joystick (X-axis for left/right)
+    right_x_axis = joystick.get_axis(3)  # Right joystick (X-axis for left/right)
     
     # Only update the up-down servo if the joystick is moved past the deadzone
     if abs(left_y_axis) > DEADZONE:
