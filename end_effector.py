@@ -2,45 +2,47 @@ import pygame
 import serial
 import time
 
-# Initialize Pygame for joystick handling
+# Initialize Pygame for joystick input
 pygame.init()
-pygame.joystick.init()
-
-# Set up joystick
 joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
-# Set up Arduino connection
-arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
-time.sleep(2)
+# Establish serial communication with Arduino
+arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1) 
+time.sleep(2) # Change 'COM3' to the correct port
 
-# Gripper servo angle range
-GRIPPER_OPEN_ANGLE = 90    # Open position (adjust as needed)
-GRIPPER_CLOSE_ANGLE = -75  # Close position (adjust as needed)
+def map_value(value, in_min, in_max, out_min, out_max):
+    return int((value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
 
-# Function to map trigger input to gripper angle
-def get_gripper_angle(left_trigger, right_trigger):
-    if left_trigger > 0.1:  # LT is pressed, open gripper
-        return GRIPPER_OPEN_ANGLE
-    elif right_trigger > 0.1:  # RT is pressed, close gripper
-        return GRIPPER_CLOSE_ANGLE
-    else:
-        return None  # No change in gripper
+# Initial end effector position
+end_effector_angle = 90
 
-# Main loop
 while True:
-    pygame.event.pump()  # Process events to get joystick values
+    pygame.event.pump()
     
-    # Get trigger values (LT and RT)
-    left_trigger = joystick.get_axis(2)  # Left trigger (LT)
-    right_trigger = joystick.get_axis(5)  # Right trigger (RT)
-    
-    # Map trigger values to gripper angle
-    gripper_angle = get_gripper_angle(left_trigger, right_trigger)
-    
-    if gripper_angle is not None:
-        # Send the gripper angle to Arduino
-        arduino.write(f"G,{gripper_angle}\n".encode('utf-8'))
-        print(f"Gripper Angle: {gripper_angle}")
-    
-    time.sleep(0.05)  # Small delay to avoid overwhelming the serial communication
+    # Get joystick values
+    base_x = joystick.get_axis(0)  # Left joystick x-axis (base)
+    right_y = joystick.get_axis(1)  # Left joystick y-axis (right servo)
+    left_y = joystick.get_axis(3)  # Right joystick y-axis (left servo)
+
+    # Map joystick values to servo angles (0-180 for all)
+    base_angle = map_value(base_x, -1, 1, 0, 180)
+    right_servo_angle = map_value(right_y, -1, 1, 0, 180)
+    left_servo_angle = map_value(left_y, -1, 1, 0, 180)
+
+    # Trigger buttons for end effector control
+    left_trigger = joystick.get_button(4)  # Left trigger (button index might vary)
+    right_trigger = joystick.get_button(5)  # Right trigger (button index might vary)
+
+    if right_trigger:
+        end_effector_angle = 180  # Open end effector
+    elif left_trigger:
+        end_effector_angle = 0  # Close end effector
+
+    # Send data to Arduino
+    arduino.write(f"B{base_angle}R{right_servo_angle}L{left_servo_angle}E{end_effector_angle}\n".encode())
+
+    # Print for debugging
+    print(f"Base: {base_angle}, Right Servo: {right_servo_angle}, Left Servo: {left_servo_angle}, End Effector: {end_effector_angle}")
+
+    time.sleep(0.1)
