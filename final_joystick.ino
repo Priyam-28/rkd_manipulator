@@ -3,7 +3,7 @@
 Servo baseMotor;
 Servo rightServo;
 Servo leftServo;
-Hekker
+
 int baseAngle = 90;  // Initial positions
 int rightServoAngle = 135;
 int leftServoAngle = 90;
