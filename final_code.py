@@ -8,7 +8,8 @@ joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
 # Establish serial communication with Arduino
-ser = serial.Serial('COM3', 9600)  # Change 'COM3' to the correct port
+arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1) 
+time.sleep(2)
 
 def map_value(value, in_min, in_max, out_min, out_max):
     return int((value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
@@ -27,7 +28,7 @@ while True:
     left_servo_angle = map_value(left_y, -1, 1, 0, 180)
 
     # Send data to Arduino
-    ser.write(f"B{base_angle}R{right_servo_angle}L{left_servo_angle}\n".encode())
+    arduino.write(f"B{base_angle}R{right_servo_angle}L{left_servo_angle}\n".encode())
 
     # Print for debugging
     print(f"Base: {base_angle}, Right Servo: {right_servo_angle}, Left Servo: {left_servo_angle}")
