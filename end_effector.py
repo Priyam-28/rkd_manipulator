@@ -8,7 +8,7 @@ joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
 # Establish serial communication with Arduino
-arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1) 
+arduino = serial.Serial('/dev/ttyACM1', 9600, timeout=1) 
 time.sleep(2) # Change 'COM3' to the correct port
 
 def map_value(value, in_min, in_max, out_min, out_max):

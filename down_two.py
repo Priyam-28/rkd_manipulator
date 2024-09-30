@@ -2,50 +2,49 @@ import pygame
 import serial
 import time
 
-# Initialize Pygame for joystick handling
+# Initialize Pygame for joystick input
 pygame.init()
-pygame.joystick.init()
-
-# Set up joystick
 joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
-# Set up Arduino connection
-arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
-time.sleep(2)
+# Establish serial communication with Arduino
+arduino = serial.Serial('/dev/ttyACM1', 9600, timeout=1)
+time.sleep(2)  # Wait for Arduino to initialize
 
-# Function to map joystick value (-1 to 1) to servo angle (0 to 180)
-def map_joystick_value(value):
-    return int((value + 2) * 90)
+def map_value(value, in_min, in_max, out_min, out_max):
+    return int((value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
 
-# Initial positions of the servos
-current_up_down_angle = 90  # Starting in the middle
-current_left_right_angle = 90  # Starting in the middle
+# Initial end effector position
+end_effector_angle = 90
 
-# Deadzone threshold to prevent small movements from the joystick causing updates
-DEADZONE = 0.1
-
-# Main loop
 while True:
-    pygame.event.pump()  # Process events to get joystick values
-    
-    # Get joystick Y-axis value (up-down movement from left joystick)
-    left_y_axis = joystick.get_axis(1)  # Left joystick (Y-axis for up/down)
+    pygame.event.pump()
 
-    # Get joystick X-axis value (left-right movement from right joystick)
-    right_x_axis = joystick.get_axis(3)  # Right joystick (X-axis for left/right)
-    
-    # Only update the up-down servo if the joystick is moved past the deadzone
-    if abs(left_y_axis) > DEADZONE:
-        current_up_down_angle = map_joystick_value(left_y_axis)
-    
-    # Only update the left-right servo if the joystick is moved past the deadzone
-    if abs(right_x_axis) > DEADZONE:
-        current_left_right_angle = map_joystick_value(right_x_axis)
-    
-    # Send the angle to Arduino for both movements (servo 1 for up-down and servo 2 for left-right)
-    arduino.write(f"{current_up_down_angle},{current_left_right_angle}\n".encode('utf-8'))
-    
-    print(f"Up-Down Servo Angle: {current_up_down_angle}, Left-Right Servo Angle: {current_left_right_angle}")
-    
-    time.sleep(0.05)  # Small delay to avoid overwhelming the serial communication
+    # Get joystick values (Make sure axis 0 is the base axis)
+    base_x = joystick.get_axis(0)  # Left joystick x-axis (base)
+    right_y = joystick.get_axis(1)  # Left joystick y-axis (right servo)
+    left_y = joystick.get_axis(3)  # Right joystick y-axis (left servo)
+
+    # Map joystick values to servo angles (0-180 for all)
+    base_angle = map_value(base_x, -1, 1, 0, 180)
+    right_servo_angle = map_value(right_y, -1, 1, 0, 180)
+    left_servo_angle = map_value(left_y, -1, 1, 0, 180)
+
+    # Trigger buttons for end effector control
+    left_trigger = joystick.get_button(4)  # Left trigger
+    right_trigger = joystick.get_button(5)  # Right trigger
+
+    if right_trigger:
+        end_effector_angle = 180  # Open end effector
+    elif left_trigger:
+        end_effector_angle = 0  # Close end effector
+
+    # Throttle sending commands to avoid overloading the serial port
+    time.sleep(0.05)  # Reduce send frequency slightly
+
+    # Send data to Arduino
+    data_string = f"B{base_angle}R{right_servo_angle}L{left_servo_angle}E{end_effector_angle}\n"
+    arduino.write(data_string.encode())
+
+    # Print for debugging
+    print(f"Sending to Arduino - Base: {base_angle}, Right Servo: {right_servo_angle}, Left Servo: {left_servo_angle}, End Effector: {end_effector_angle}")
