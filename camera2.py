@@ -1,125 +1,129 @@
 import cv2
-import serial
 import mediapipe as mp
-import numpy as np
+import serial
+import time
 
-# Configurations
-debug = False  # Set to True for debugging without Arduino
-cam_source = 0  # Set to 0 for the default webcam
+# Configuration
+debug = False  # Set to False when using with Arduino
+cam_source = 0  # 0 for default camera, or use IP camera URL
 
+# Serial configuration
 if not debug:
-    ser = serial.Serial('/dev/ttyACM0', 9600, timeout=1)  # Set to your serial port
-    ser.timeout = 1
+    try:
+        ser = serial.Serial('COM4', 115200, timeout=1)
+        time.sleep(2)  # Allow time for connection to establish
+    except serial.SerialException:
+        print("Could not open serial port. Make sure Arduino is connected.")
+        ser = None
+else:
+    ser = None
 
 # Servo angle ranges
-base_min, base_max = 0, 180
-left_servo_min, left_servo_max = 0, 180
-right_servo_min, right_servo_max = 0, 180
-claw_open, claw_close = 0, 180
+x_min, x_mid, x_max = 0, 75, 150
+y_min, y_mid, y_max = 0, 90, 180
+z_min, z_mid, z_max = 10, 90, 180
+claw_open, claw_close = 60, 0
 
-# Initialize MediaPipe Pose
-mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+# Hand landmark thresholds
+wrist_y_min, wrist_y_max = 0.3, 0.9
+palm_size_min, palm_size_max = 0.1, 0.3
+palm_angle_min, palm_angle_mid = -50, 20
 
-# Utility functions for mapping and clamping
+# Initialize servo angles
+servo_angle = [x_mid, y_mid, z_mid, claw_open]
+prev_servo_angle = servo_angle.copy()
+
+# Utility functions
 clamp = lambda n, minn, maxn: max(min(maxn, n), minn)
-map_range = lambda x, in_min, in_max, out_min, out_max: (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
+map_range = lambda x, in_min, in_max, out_min, out_max: int((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
 
-# Function to calculate angle between three points
-def calculate_angle(a, b, c):
-    a = np.array(a)  # First point (elbow)
-    b = np.array(b)  # Middle point (shoulder)
-    c = np.array(c)  # Last point (wrist)
+# MediaPipe initialization
+mp_hands = mp.solutions.hands
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
 
-    radians = np.arctan2(c[1] - b[1], c[0] - b[0]) - np.arctan2(a[1] - b[1], a[0] - b[0])
-    angle = np.abs(radians * 180.0 / np.pi)
+def is_hand_closed(landmarks):
+    thumb_tip = landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
+    index_tip = landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
+    distance = ((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2)**0.5
+    return distance < 0.05
 
-    if angle > 180.0:
-        angle = 360 - angle
+def calculate_servo_angles(hand_landmarks):
+    wrist = hand_landmarks.landmark[mp_hands.HandLandmark.WRIST]
+    index_mcp = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP]
+    
+    # Calculate palm size (distance between wrist and index MCP)
+    palm_size = ((wrist.x - index_mcp.x)**2 + (wrist.y - index_mcp.y)**2)**0.5
+    
+    # X-axis (base rotation)
+    angle_x = (wrist.x - index_mcp.x) / palm_size
+    angle_x = int(angle_x * 180 / 3.14159)
+    angle_x = clamp(angle_x, palm_angle_min, palm_angle_mid)
+    servo_x = map_range(angle_x, palm_angle_min, palm_angle_mid, x_max, x_min)
+    
+    # Y-axis (up/down)
+    wrist_y = clamp(wrist.y, wrist_y_min, wrist_y_max)
+    servo_y = map_range(wrist_y, wrist_y_min, wrist_y_max, y_max, y_min)
+    
+    # Z-axis (forward/backward)
+    palm_size = clamp(palm_size, palm_size_min, palm_size_max)
+    servo_z = map_range(palm_size, palm_size_min, palm_size_max, z_max, z_min)
+    
+    # Claw
+    servo_claw = claw_close if is_hand_closed(hand_landmarks) else claw_open
+    
+    return [servo_x, servo_y, servo_z, servo_claw]
 
-    return angle
-
-# Initialize webcam
+# Camera setup
 cap = cv2.VideoCapture(cam_source)
 
-# Main loop for pose detection and servo control
-while cap.isOpened():
-    success, image = cap.read()
-    if not success:
-        print("Ignoring empty camera frame.")
-        continue
+with mp_hands.Hands(model_complexity=0, min_detection_confidence=0.5, min_tracking_confidence=0.5) as hands:
+    while cap.isOpened():
+        success, image = cap.read()
+        if not success:
+            print("Ignoring empty camera frame.")
+            continue
 
-    # Flip the image for selfie-view and convert to RGB
-    image = cv2.flip(image, 1)
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = pose.process(image_rgb)
+        image.flags.writeable = False
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        results = hands.process(image)
 
-    # Default servo angles
-    base_angle = 90
-    left_servo_angle = 90
-    right_servo_angle = 90
-    claw_angle = claw_open
+        image.flags.writeable = True
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
-    if results.pose_landmarks:
-        landmarks = results.pose_landmarks.landmark
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(
+                    image,
+                    hand_landmarks,
+                    mp_hands.HAND_CONNECTIONS,
+                    mp_drawing_styles.get_default_hand_landmarks_style(),
+                    mp_drawing_styles.get_default_hand_connections_style())
+            
+            # Use the first detected hand for control
+            servo_angle = calculate_servo_angles(results.multi_hand_landmarks[0])
+            
+            if servo_angle != prev_servo_angle:
+                print("Servo angles:", servo_angle)
+                prev_servo_angle = servo_angle.copy()
+                if ser:
+                    try:
+                        # Send data in the format: B{base}L{left}R{right}E{claw}
+                        command = f"B{servo_angle[0]}L{servo_angle[1]}R{servo_angle[2]}E{servo_angle[3]}\n"
+                        ser.write(command.encode())
+                        ser.flush()
+                    except serial.SerialException as e:
+                        print(f"Error sending data to Arduino: {e}")
 
-        # Extract required landmarks for calculations (elbow, shoulder, wrist, etc.)
-        left_shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, 
-                         landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-        left_elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x, 
-                      landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
-        left_wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x, 
-                      landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
-        
-        right_shoulder = [landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x, 
-                          landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].y]
-        right_elbow = [landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value].x, 
-                       landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value].y]
-        right_wrist = [landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value].x, 
-                       landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value].y]
+        # Flip the image horizontally for a selfie-view display.
+        image = cv2.flip(image, 1)
+        cv2.putText(image, f"Angles: {servo_angle}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.imshow('Hand-Controlled Robotic Arm', image)
 
-        # Calculate the angle for the base motor using left elbow and shoulder
-        left_elbow_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
-        base_angle = map_range(left_elbow_angle, 70, 160, base_min, base_max)  # Adjust ranges as per your needs
-        base_angle = clamp(base_angle, base_min, base_max)
+        if cv2.waitKey(5) & 0xFF == 27:  # Press 'Esc' to exit
+            break
 
-        # Calculate wrist angles for left and right servo control
-        left_wrist_angle = calculate_angle(left_elbow, left_wrist, [left_wrist[0] + 1, left_wrist[1]])  # Angle relative to x-axis
-        left_servo_angle = map_range(left_wrist_angle, 0, 180, left_servo_min, left_servo_max)
-        left_servo_angle = clamp(left_servo_angle, left_servo_min, left_servo_max)
-
-        right_wrist_angle = calculate_angle(right_elbow, right_wrist, [right_wrist[0] + 1, right_wrist[1]])
-        right_servo_angle = map_range(right_wrist_angle, 0, 180, right_servo_min, right_servo_max)
-        right_servo_angle = clamp(right_servo_angle, right_servo_min, right_servo_max)
-
-        # Claw control based on open/closed hand (approximated by distance between thumb and fingers)
-        left_thumb_tip = landmarks[mp_pose.PoseLandmark.LEFT_THUMB_TIP.value]
-        left_index_tip = landmarks[mp_pose.PoseLandmark.LEFT_INDEX_FINGER_TIP.value]
-        thumb_index_distance = np.linalg.norm(np.array([left_thumb_tip.x, left_thumb_tip.y]) - np.array([left_index_tip.x, left_index_tip.y]))
-
-        if thumb_index_distance < 0.05:  # Small distance implies closed hand
-            claw_angle = claw_close
-        else:
-            claw_angle = claw_open
-
-        # Send servo angles to Arduino
-        if not debug:
-            ser.write(f"B{int(base_angle)}R{int(right_servo_angle)}L{int(left_servo_angle)}E{int(claw_angle)}\n".encode())
-
-        # Draw landmarks and connections on the image
-        mp.solutions.drawing_utils.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-
-    # Display current servo angles on the screen
-    cv2.putText(image, f"Base: {int(base_angle)}, Left: {int(left_servo_angle)}, Right: {int(right_servo_angle)}, Claw: {int(claw_angle)}",
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
-
-    # Show the image
-    cv2.imshow('Robotic Arm Control', image)
-
-    # Break the loop on 'Esc' key press
-    if cv2.waitKey(5) & 0xFF == 27:
-        break
-
-# Release resources
 cap.release()
 cv2.destroyAllWindows()
+if ser:
+    ser.close()
