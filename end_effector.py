@@ -15,7 +15,7 @@ def map_value(value, in_min, in_max, out_min, out_max):
     return int((value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
 
 # Initial end effector position
-end_effector_angle = 90
+end_effector_angle = 180
 
 while True:
     pygame.event.pump()
@@ -28,7 +28,7 @@ while True:
     # Map joystick values to servo angles (0-180 for all)
     base_angle = map_value(base_x, -1, 1, 0, 180)
     right_servo_angle = map_value(right_y, -1, 1, 0, 180)
-    left_servo_angle = map_value(left_y, -1, 1, 0, 180)
+    left_servo_angle = map_value(left_y, -1, 1, -30, 80)
 
     # Trigger buttons for end effector control
     left_trigger = joystick.get_button(4)  # Left trigger (button index might vary)
