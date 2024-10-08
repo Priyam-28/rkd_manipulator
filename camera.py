@@ -10,24 +10,35 @@ time.sleep(2)  # Wait for the Arduino to initialize
 
 # Initialize MediaPipe for hand tracking
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7, min_tracking_confidence=0.5)
+hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7, min_tracking_confidence=0.5)
 mp_drawing = mp.solutions.drawing_utils
 
 # Map function
 def map_value(value, in_min, in_max, out_min, out_max):
     return int((value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
 
-# Hand gesture detection for end effector (open/close)
-def is_claw_open(landmarks):
-    # Calculate the distance between thumb tip (landmark 4) and index finger tip (landmark 8)
-    thumb_tip = landmarks[4]
-    index_tip = landmarks[8]
-    
-    # Euclidean distance between thumb tip and index tip
-    distance = math.sqrt((thumb_tip.x - index_tip.x) ** 2 + (thumb_tip.y - index_tip.y) ** 2)
-    
-    # Threshold for detecting open hand (distance is relatively larger)
-    return distance > 0.1
+# Calculate Euclidean distance between two points
+def calculate_distance(landmark1, landmark2):
+    return math.sqrt((landmark1.x - landmark2.x) ** 2 + (landmark1.y - landmark2.y) ** 2)
+
+# Check if the hand is open (palm open)
+def is_palm_open(landmarks):
+    # Calculate distance between wrist and middle finger tip (landmark 9 and 0 for wrist)
+    wrist = landmarks[0]
+    middle_tip = landmarks[12]
+    distance = calculate_distance(wrist, middle_tip)
+    return distance > 0.3  # Threshold for detecting an open palm
+
+# Check finger curl (compare tip and knuckle positions)
+def is_finger_curled(tip, pip):
+    distance = calculate_distance(tip, pip)
+    return distance < 0.05  # Threshold for detecting curl
+
+# Hand gesture detection for left servo (thumb curl)
+def is_thumb_curled(landmarks):
+    thumb_tip = landmarks[4]  # Thumb tip
+    thumb_pip = landmarks[2]  # Thumb pip (proximal interphalangeal joint)
+    return is_finger_curled(thumb_tip, thumb_pip)  # True if thumb is curled
 
 # Main function
 def main():
@@ -57,27 +68,27 @@ def main():
                 hand_x = hand_landmarks.landmark[0].x  # Wrist landmark
                 base_angle = map_value(hand_x, 0, 1, 0, 180)
 
-                # Right hand wrist y-axis controls right servo (indexing landmark 0 for wrist)
-                if hand_landmarks.landmark[0].y > 0.5:  # Right hand condition
-                    right_wrist_y = hand_landmarks.landmark[0].y
-                    right_servo_angle = map_value(right_wrist_y, 0, 1, 0, 180)
+                # Right servo controlled by y-axis hand movement
+                hand_y = hand_landmarks.landmark[0].y  # Wrist landmark
+                right_servo_angle = map_value(hand_y, 0, 1, 0, 180)
 
-                    # Claw open/close (right hand)
-                    if is_claw_open(hand_landmarks.landmark):
-                        end_effector_angle = 180  # Open
-                    else:
-                        end_effector_angle = 0  # Closed
+                # Left servo controlled by thumb curl
+                if is_thumb_curled(hand_landmarks.landmark):
+                    left_servo_angle = -30  # Full curl
+                else:
+                    left_servo_angle = 80  # Fully extended
 
-                # Left hand wrist y-axis controls left servo
-                if hand_landmarks.landmark[0].y < 0.5:  # Left hand condition
-                    left_wrist_y = hand_landmarks.landmark[0].y
-                    left_servo_angle = map_value(left_wrist_y, 0, 1, -30, 100)
+                # Claw open/close (controlled by palm open/close)
+                if is_palm_open(hand_landmarks.landmark):
+                    end_effector_angle = 180  # Open
+                else:
+                    end_effector_angle = 0  # Closed
 
                 # Send data to Arduino
                 data_string = f"B{base_angle}R{right_servo_angle}L{left_servo_angle}E{end_effector_angle}\n"
                 arduino.write(data_string.encode())
 
-                # Display data on the terminal for debugging
+                # Display data on the terminal for debugging    
                 print(f"Base: {base_angle}, Right Servo: {right_servo_angle}, Left Servo: {left_servo_angle}, End Effector: {end_effector_angle}")
 
         # Display the frame
